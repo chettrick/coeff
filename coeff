@@ -1,0 +1,101 @@
+#! /bin/sh
+#
+# Copyright (c) 2013 Chris Hettrick <chris@structfoo.com>
+#
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+# coeff - compare sensor coefficients between calibration
+#	  certificates and instrument log captures.
+#
+# usage: coeff [directory]
+#
+
+umask 077	# protect temp files
+
+export LC_ALL='C'
+
+COEFF=/usr/local/etc/coeff.lst
+
+CALIBCOEFF=`mktemp -t calibcoeff.XXXXXXXXXX` || exit 1
+CAPTURECOEFF=`mktemp -t capturecoeff.XXXXXXXXXX` || exit 1
+OUT=`mktemp -t out.XXXXXXXXXX` || exit 1
+TMP=`mktemp -t tmp.XXXXXXXXXX` || exit 1
+TMPTMP=`mktemp -t tmptmp.XXXXXXXXXX` || exit 1
+
+trap "exit 1" HUP INT PIPE QUIT TERM
+trap "rm -f $CALIBCOEFF $CAPTURECOEFF $OUT $TMP $TMPTMP" EXIT
+
+if [ "X$1" = "X" ]; then
+	# Only a single CD or USB stick at a time.
+	mount | grep -E "cd9660|iso9660|udf|fat|msdos" | cut -d " " -f 3 > $TMP
+	case X"$(cat $TMP | wc -l | tr -cd "[:digit:]")" in
+		X1) ROOTDIR=$(cat $TMP);;
+		X0) echo "$0: Cannot find mounted drive." >&2; exit 1;;
+		X*) echo "$0: Too many drives mounted." >&2; exit 1;;
+	esac
+else
+	ROOTDIR=$1;	
+fi
+
+# Find sensor serial numbers from capture files.
+find "$ROOTDIR"/* -type f -name \*.txt > $TMP
+while read f
+do
+	grep "SensorSN" "$f" |
+	awk -F[=] '{ print $2 }' >> $CAPTURECOEFF
+	grep -I '^[CPT]*[U]*[[:alpha:]]=' "$f" >> $CAPTURECOEFF
+done < $TMP
+if (! test -s $CAPTURECOEFF); then
+	echo "$0: No capture file found." >&2; exit 1;
+fi
+
+# Find calibration and conformity files.
+find "$ROOTDIR"/* -path "$ROOTDIR"/*/Software -prune -o -path \
+	"$ROOTDIR"/*/Manual* -prune -o -type f -name \*.pdf -print > $TMP
+
+# Find record fields in calibration and conformity files.
+while read f
+do
+	grep -a "NLCUSTRECORD" "$f" |
+	awk -F[\(\)] '{ print $2, $6 }' |
+	sort |
+	join $COEFF - |
+	cut -d " " -f 2- |
+	sort >> $TMPTMP
+done < $TMP
+grep -E 'Asset|Coeff' $TMPTMP | awk -F' ' '{ print $NF }' > $CALIBCOEFF
+if (! test -s $CALIBCOEFF); then
+	echo "$0: No calibration file found." >&2; exit 1;
+fi
+
+# Compare calibration coefficients between pdf and capture files.
+sed -r s/0.000000E-01/0.000000E+0/g $CAPTURECOEFF |
+tr -d '\r' |
+sed -r 's/(E[-+])0([0-9])/\1\2/g' |
+awk -F'=' '{ print $1 " " $NF }' |
+awk -F' ' '{ print $NF }' > $TMPTMP
+cat $TMPTMP > $CAPTURECOEFF
+
+grep -v "0.000000E+0" $CALIBCOEFF | sort > $TMPTMP
+cat $TMPTMP > $CALIBCOEFF
+grep -v "0.000000E+0" $CAPTURECOEFF | sort > $TMPTMP
+cat $TMPTMP > $CAPTURECOEFF
+
+sdiff -s -w 30 $CALIBCOEFF $CAPTURECOEFF > $OUT
+
+if (test -s $OUT); then
+	cat $OUT;
+	echo; echo "Sensor coefficients do not match.";
+else
+	echo; echo "Sensor coefficients match.";
+fi
