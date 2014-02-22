@@ -1,4 +1,4 @@
 coeff
 =====
 
-Brain-dead coefficient checker.
+brain-dead coefficient checker
