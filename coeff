@@ -17,14 +17,14 @@
 # coeff - compare sensor coefficients between calibration
 #	  certificates and instrument log captures.
 #
-# usage: coeff [directory]
+# usage: coeff
 #
 
-umask 077	# protect temp files
+umask 077
 
 export LC_ALL='C'
 
-COEFF=/usr/local/etc/coeff.lst
+COEFF=/usr/local/share/coeff/coeff.lst
 
 CALIBCOEFF=`mktemp -t calibcoeff.XXXXXXXXXX` || exit 1
 CAPTURECOEFF=`mktemp -t capturecoeff.XXXXXXXXXX` || exit 1
@@ -35,67 +35,95 @@ TMPTMP=`mktemp -t tmptmp.XXXXXXXXXX` || exit 1
 trap "exit 1" HUP INT PIPE QUIT TERM
 trap "rm -f $CALIBCOEFF $CAPTURECOEFF $OUT $TMP $TMPTMP" EXIT
 
-if [ "X$1" = "X" ]; then
-	# Only a single CD or USB stick at a time.
-	mount | grep -E "cd9660|iso9660|udf|fat|msdos" | cut -d " " -f 3 > $TMP
-	case X"$(cat $TMP | wc -l | tr -cd "[:digit:]")" in
-		X1) ROOTDIR=$(cat $TMP);;
-		X0) echo "$0: Cannot find mounted drive." >&2; exit 1;;
-		X*) echo "$0: Too many drives mounted." >&2; exit 1;;
-	esac
-else
-	ROOTDIR=$1;	
-fi
+find_drives() {
+	if [ "X$1" = "X" ]; then
+		# Only a single CD or USB stick at a time.
+		mount | grep -E "cd9660|iso9660|udf|fat|msdos" |
+		    cut -d " " -f 3 > $TMP
+		case X"$(cat $TMP | wc -l | tr -cd "[:digit:]")" in
+			X1) ROOTDIR=$(cat $TMP);;
+			X0) echo "$0: Cannot find mounted drive." >&2; exit 1;;
+			X*) echo "$0: Too many drives mounted." >&2; exit 1;;
+		esac
+	else
+		ROOTDIR=$1;	
+	fi
+}
 
-# Find sensor serial numbers from capture files.
-find "$ROOTDIR"/* -type f -name \*.txt > $TMP
-while read f
-do
-	grep "SensorSN" "$f" |
-	awk -F[=] '{ print $2 }' >> $CAPTURECOEFF
-	grep -I '^[CPT]*[U]*[[:alpha:]]=' "$f" >> $CAPTURECOEFF
-done < $TMP
-if (! test -s $CAPTURECOEFF); then
-	echo "$0: No capture file found." >&2; exit 1;
-fi
+# Find sensor serial numbers and calibration dates from capture files.
+find_sn_caldate_capture() {
+	find "$ROOTDIR"/* -type f -name \*.txt > $TMP
+	while read f
+	do
+		grep "SensorSN" "$f" |
+		    awk -F[=] '{ print $2 }' >> $CAPTURECOEFF
+		grep "CalDate" "$f" |
+		    awk -F[=] '{ print $2 }' |
+		    awk -F[/] '{ print $2"/"$1"/20"$3 }' |
+		    awk '{ gsub ("^0*", "", $0); \
+			gsub ("/0*", "/", $0); print }' >> $CAPTURECOEFF
+		grep -I '^[CPT]*[U]*[[:alpha:]]=' "$f" >> $CAPTURECOEFF
+	done < $TMP
+	if (! test -s $CAPTURECOEFF); then
+		echo "$0: No capture file found." >&2; exit 1;
+	fi
+}
 
 # Find calibration and conformity files.
-find "$ROOTDIR"/* -path "$ROOTDIR"/*/Software -prune -o -path \
-	"$ROOTDIR"/*/Manual* -prune -o -type f -name \*.pdf -print > $TMP
+find_cal_files() {
+	find "$ROOTDIR"/* -path "$ROOTDIR"/*/Software -prune -o -path \
+	    "$ROOTDIR"/*/Manual* -prune -o -type f -name \*.pdf -print > $TMP
+}
 
 # Find record fields in calibration and conformity files.
-while read f
-do
-	grep -a "NLCUSTRECORD" "$f" |
-	awk -F[\(\)] '{ print $2, $6 }' |
-	sort |
-	join $COEFF - |
-	cut -d " " -f 2- |
-	sort >> $TMPTMP
-done < $TMP
-grep -E 'Asset|Coeff' $TMPTMP | awk -F' ' '{ print $NF }' > $CALIBCOEFF
-if (! test -s $CALIBCOEFF); then
-	echo "$0: No calibration file found." >&2; exit 1;
-fi
+find_records() {
+	while read f
+	do
+		grep -a "NLCUSTRECORD" "$f" |
+		    awk -F[\(\)] '{ print $2, $6 }' |
+		    sort |
+		    join $COEFF - |
+		    cut -d " " -f 2- |
+		    sort >> $TMPTMP
+	done < $TMP
+	grep -E 'Asset|Coeff|Calibration Date' $TMPTMP |
+	    awk -F' ' '{ print $NF }' > $CALIBCOEFF
+	if (! test -s $CALIBCOEFF); then
+		echo "$0: No calibration file found." >&2; exit 1;
+	fi
+}
 
 # Compare calibration coefficients between pdf and capture files.
-sed -r s/0.000000E-01/0.000000E+0/g $CAPTURECOEFF |
-tr -d '\r' |
-sed -r 's/(E[-+])0([0-9])/\1\2/g' |
-awk -F'=' '{ print $1 " " $NF }' |
-awk -F' ' '{ print $NF }' > $TMPTMP
-cat $TMPTMP > $CAPTURECOEFF
+diff_coeff() {
+	sed -r s/0.000000E-01/0.000000E+0/g $CAPTURECOEFF |
+	    tr -d '\r' |
+	    sed -r 's/(E[-+])0([0-9])/\1\2/g' |
+	    awk -F'=' '{ print $1 " " $NF }' |
+	    awk -F' ' '{ print $NF }' > $TMPTMP
+	cat $TMPTMP > $CAPTURECOEFF
 
-grep -v "0.000000E+0" $CALIBCOEFF | sort > $TMPTMP
-cat $TMPTMP > $CALIBCOEFF
-grep -v "0.000000E+0" $CAPTURECOEFF | sort > $TMPTMP
-cat $TMPTMP > $CAPTURECOEFF
+	grep -v "0.000000E+0" $CALIBCOEFF |
+	    sort > $TMPTMP
+	cat $TMPTMP > $CALIBCOEFF
+	grep -v "0.000000E+0" $CAPTURECOEFF |
+	    sort > $TMPTMP
+	cat $TMPTMP > $CAPTURECOEFF
 
-sdiff -s -w 30 $CALIBCOEFF $CAPTURECOEFF > $OUT
+	sdiff -s -w 30 $CALIBCOEFF $CAPTURECOEFF > $OUT
+}
 
-if (test -s $OUT); then
-	cat $OUT;
-	echo; echo "Sensor coefficients do not match.";
-else
-	echo; echo "Sensor coefficients match.";
-fi
+coeff_match() {
+	if (test -s $OUT); then
+		cat $OUT;
+		echo; echo "Sensor coefficients do not match.";
+	else
+		echo; echo "Sensor coefficients match.";
+	fi
+}
+
+find_drives "$1"
+find_sn_caldate_capture
+find_cal_files
+find_records
+diff_coeff
+coeff_match
