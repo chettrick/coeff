@@ -17,7 +17,7 @@
 # coeff - compare sensor coefficients between calibration
 #	  certificates and instrument log captures.
 #
-# usage: coeff
+# usage: coeff [directory]
 #
 
 umask 077
@@ -52,18 +52,23 @@ find_drives() {
 
 # Find sensor serial numbers and calibration dates from capture files.
 find_sn_caldate_capture() {
+	# Find all log capture text files.
 	find "$ROOTDIR"/* -type f -name \*.txt > $TMP
 	while read f
 	do
+		# Grab all sensor serial numbers from capture files.
 		grep "SensorSN" "$f" |
 		    awk -F[=] '{ print $2 }' >> $CAPTURECOEFF
+		# Grab all sensor cal dates, and fix up the formatting.
 		grep "CalDate" "$f" |
 		    awk -F[=] '{ print $2 }' |
 		    awk -F[/] '{ print $2"/"$1"/20"$3 }' |
 		    awk '{ gsub ("^0*", "", $0); \
 			gsub ("/0*", "/", $0); print }' >> $CAPTURECOEFF
+		# Grab the sensor coefficients from capture files.
 		grep -I '^[CPT]*[U]*[[:alpha:]]=' "$f" >> $CAPTURECOEFF
 	done < $TMP
+	# Check if any serial numbers, cal dates, or coefficients were found.
 	if (! test -s $CAPTURECOEFF); then
 		echo "$0: No capture file found." >&2; exit 1;
 	fi
@@ -79,15 +84,20 @@ find_cal_files() {
 find_records() {
 	while read f
 	do
+		# Search through the pdfs for records.
 		grep -a "NLCUSTRECORD" "$f" |
 		    awk -F[\(\)] '{ print $2, $6 }' |
 		    sort |
+		    # Match up found records with coeff.lst.
 		    join $COEFF - |
+		    # Remove the NLCUSTRECORD fields; leave the records.
 		    cut -d " " -f 2- |
 		    sort >> $TMPTMP
 	done < $TMP
+	# Strip out currently not needed data.
 	grep -E 'Asset|Coeff|Calibration Date' $TMPTMP |
 	    awk -F' ' '{ print $NF }' > $CALIBCOEFF
+	# Check if any serial numbers, cal dates, or coefficients were found.
 	if (! test -s $CALIBCOEFF); then
 		echo "$0: No calibration file found." >&2; exit 1;
 	fi
@@ -95,24 +105,33 @@ find_records() {
 
 # Compare calibration coefficients between pdf and capture files.
 diff_coeff() {
+	# Fix up the formatting for floating point zero.
 	sed -r s/0.000000E-01/0.000000E+0/g $CAPTURECOEFF |
+	    # Remove DOS line endings; leave UNIX line ending.
 	    tr -d '\r' |
+	    # Remove the leading zero of an exponent less than ten.
 	    sed -r 's/(E[-+])0([0-9])/\1\2/g' |
+	    # Replace the `=' sign between designator and value with a space.
 	    awk -F'=' '{ print $1 " " $NF }' |
+	    # Remove the designators completely.
 	    awk -F' ' '{ print $NF }' > $TMPTMP
 	cat $TMPTMP > $CAPTURECOEFF
 
+	# Remove zeros from the temp calibration file.
 	grep -v "0.000000E+0" $CALIBCOEFF |
 	    sort > $TMPTMP
 	cat $TMPTMP > $CALIBCOEFF
+	# Remove zeros from the temp capture file.
 	grep -v "0.000000E+0" $CAPTURECOEFF |
 	    sort > $TMPTMP
 	cat $TMPTMP > $CAPTURECOEFF
 
+	# Compare the data between the cal temp file and the capture temp file.
 	sdiff -s -w 30 $CALIBCOEFF $CAPTURECOEFF > $OUT
 }
 
 coeff_match() {
+	# Check if there are any differences between the pdfs and the captures.
 	if (test -s $OUT); then
 		cat $OUT;
 		echo; echo "Sensor coefficients do not match.";
