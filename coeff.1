@@ -12,7 +12,7 @@
 .\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 .\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 .\"
-.Dd $Mdocdate: June 24 2014 $
+.Dd $Mdocdate: September 9 2014 $
 .Dt COEFF 1
 .Os
 .Sh NAME
@@ -48,7 +48,7 @@ Sorted list of record value pairs from NetSuite.
 was written by
 .An Chris Hettrick Aq chris@structfoo.com .
 .Sh CAVEATS
-Tested only on Xchange series sensors.
+Tested only on Xchange series instruments and sensors.
 .Pp
 The file
 .Pa /usr/local/share/coeff/coeff.lst
@@ -56,8 +56,3 @@ must be sorted with
 .Xr sort 1
 before executing
 .Nm .
-.Pp
-The current matching algorithm compares absolute
-differences between capture and calibration files
-and not contextual differences.
-This might not matter, depending on who you are.
