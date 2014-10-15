@@ -1,6 +1,6 @@
 #! /bin/sh
 #
-# Copyright (c) 2013 Chris Hettrick <chris@structfoo.com>
+# Copyright (c) 2014 Chris Hettrick <chris@structfoo.com>
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -76,8 +76,8 @@ find_sn_caldate_capture() {
 
 # Find calibration and conformity files.
 find_cal_files() {
-	find "$ROOTDIR"/* -path "$ROOTDIR"/*/Software -prune -o -path \
-	    "$ROOTDIR"/*/Manual* -prune -o -type f -name \*.pdf -print > $TMP
+	find "$ROOTDIR"/* -path "$ROOTDIR"/Software -prune -o -path \
+	    "$ROOTDIR"/Manual* -prune -o -type f -name \*.pdf -print > $TMP
 }
 
 # Find record fields in calibration and conformity files.
